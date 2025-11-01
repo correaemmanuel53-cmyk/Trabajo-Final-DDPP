@@ -4,14 +4,14 @@ import numpy as np
 from influxdb_client import InfluxDBClient
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime
 import time
 import os
 from dotenv import load_dotenv
 
-# ========================
-# CARGAR CREDENCIALES
-# ========================
+# -------------------------------------------------
+# CREDENCIALES (Streamlit Secrets o .env)
+# -------------------------------------------------
 if "INFLUXDB_URL" in st.secrets:
     INFLUXDB_URL = st.secrets["INFLUXDB_URL"]
     INFLUXDB_TOKEN = st.secrets["INFLUXDB_TOKEN"]
@@ -24,100 +24,35 @@ else:
     INFLUXDB_ORG = os.getenv("INFLUXDB_ORG")
     INFLUXDB_BUCKET = os.getenv("INFLUXDB_BUCKET")
 
-# Validación
 if not all([INFLUXDB_URL, INFLUXDB_TOKEN, INFLUXDB_ORG, INFLUXDB_BUCKET]):
-    st.error("Faltan credenciales de InfluxDB. Verifica `.env` o `secrets`.")
+    st.error("Faltan credenciales de InfluxDB.")
     st.stop()
 
-# ========================
+# -------------------------------------------------
 # CONFIGURACIÓN DE PÁGINA
-# ========================
+# -------------------------------------------------
 st.set_page_config(
-    page_title="Extreme Manufacturing - Celda de Secado",
+    page_title="Extreme Manufacturing – Celda de Secado",
     page_icon="Factory",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ========================
-# CSS PROFESIONAL
-# ========================
+# -------------------------------------------------
+# CSS (solo lo esencial)
+# -------------------------------------------------
 st.markdown("""
 <style>
-    .main-header {
-        font-size: 2.8rem;
-        font-weight: bold;
-        color: #1f77b4;
-        text-align: center;
-        margin-bottom: 2rem;
-        text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
-    }
-    .metric-container {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1rem;
-        border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        margin-bottom: 1rem;
-    }
-    .status-good {
-        background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-        color: white;
-        padding: 0.5rem;
-        border-radius: 5px;
-        text-align: center;
-        font-weight: bold;
-    }
-    .status-warning {
-        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-        color: white;
-        padding: 0.5rem;
-        border-radius: 5px;
-        text-align: center;
-        font-weight: bold;
-    }
-    .status-critical {
-        background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%);
-        color: white;
-        padding: 0.5rem;
-        border-radius: 5px;
-        text-align: center;
-        font-weight: bold;
-    }
-    .kpi-card {
-        background: white;
-        padding: 1rem;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        border-left: 4px solid #1f77b4;
-        margin-bottom: 1rem;
-    }
-    .alert-high {
-        background-color: #ffebee;
-        border-left: 4px solid #f44336;
-        padding: 1rem;
-        margin: 0.5rem 0;
-        border-radius: 4px;
-    }
-    .alert-medium {
-        background-color: #fff3e0;
-        border-left: 4px solid #ff9800;
-        padding: 1rem;
-        margin: 0.5rem 0;
-        border-radius: 4px;
-    }
-    .alert-low {
-        background-color: #e8f5e8;
-        border-left: 4px solid #4caf50;
-        padding: 1rem;
-        margin: 0.5rem 0;
-        border-radius: 4px;
-    }
+    .main-header{font-size:2.8rem;font-weight:bold;color:#1f77b4;text-align:center;margin-bottom:2rem;}
+    .status-good{background:linear-gradient(135deg,#11998e 0%,#38ef7d 100%);color:white;padding:.5rem;border-radius:5px;text-align:center;font-weight:bold;}
+    .status-warning{background:linear-gradient(135deg,#f093fb 0%,#f5576c 100%);color:white;padding:.5rem;border-radius:5px;text-align:center;font-weight:bold;}
+    .status-critical{background:linear-gradient(135deg,#ff9a9e 0%,#fecfef 100%);color:white;padding:.5rem;border-radius:5px;text-align:center;font-weight:bold;}
 </style>
 """, unsafe_allow_html=True)
 
-# ========================
+# -------------------------------------------------
 # CLIENTE INFLUXDB
-# ========================
+# -------------------------------------------------
 @st.cache_resource
 def get_client():
     return InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG)
@@ -125,238 +60,222 @@ def get_client():
 client = get_client()
 query_api = client.query_api()
 
-# ========================
-# OBTENER DATOS REALES
-# ========================
+# -------------------------------------------------
+# OBTENER DATOS
+# -------------------------------------------------
 @st.cache_data(ttl=60)
 def get_data(range_hours=24):
     query = f'''
     from(bucket: "{INFLUXDB_BUCKET}")
       |> range(start: -{range_hours}h)
       |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
-      |> keep(columns: ["_time", "temperature", "humidity", "heat_index", "accel_x", "accel_y", "accel_z", "gyro_x", "gyro_y", "gyro_z"])
+      |> keep(columns: ["_time","temperature","humidity","heat_index",
+                       "accel_x","accel_y","accel_z","gyro_x","gyro_y","gyro_z"])
     '''
     try:
         result = query_api.query(org=INFLUXDB_ORG, query=query)
-        data = []
+        rows = []
         for table in result:
-            for record in table.records:
-                row = {
-                    "_time": record.get_time(),
-                    "temperature": record.values.get("temperature"),
-                    "humidity": record.values.get("humidity"),
-                    "heat_index": record.values.get("heat_index"),
-                    "accel_x": record.values.get("accel_x"),
-                    "accel_y": record.values.get("accel_y"),
-                    "accel_z": record.values.get("accel_z"),
-                    "gyro_x": record.values.get("gyro_x"),
-                    "gyro_y": record.values.get("gyro_y"),
-                    "gyro_z": record.values.get("gyro_z")
-                }
-                data.append(row)
-
-        if not data:
+            for rec in table.records:
+                rows.append({
+                    "_time": rec.get_time(),
+                    "temperature": rec.values.get("temperature"),
+                    "humidity": rec.values.get("humidity"),
+                    "heat_index": rec.values.get("heat_index"),
+                    "accel_x": rec.values.get("accel_x"),
+                    "accel_y": rec.values.get("accel_y"),
+                    "accel_z": rec.values.get("accel_z"),
+                    "gyro_x": rec.values.get("gyro_x"),
+                    "gyro_y": rec.values.get("gyro_y"),
+                    "gyro_z": rec.values.get("gyro_z")
+                })
+        if not rows:
             return pd.DataFrame()
 
-        df = pd.DataFrame(data)
-        df['_time'] = pd.to_datetime(df['_time'])
-        df = df.set_index('_time').sort_index()
+        df = pd.DataFrame(rows)
+        df["_time"] = pd.to_datetime(df["_time"])
+        df = df.set_index("_time").sort_index()
 
-        # Convertir a numérico
-        for col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-
-        # Eliminar filas sin datos útiles
-        df = df.dropna(how='all', subset=df.columns)
+        # Numérico + limpiar filas vacías
+        for c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+        df = df.dropna(how="all", subset=df.columns)
         return df
-
     except Exception as e:
-        st.error(f"Error de conexión: {e}")
+        st.error(f"Error InfluxDB: {e}")
         return pd.DataFrame()
 
-# ========================
+# -------------------------------------------------
 # TÍTULO
-# ========================
-st.markdown('<h1 class="main-header">Factory Extreme Manufacturing - Celda de Secado</h1>', unsafe_allow_html=True)
-st.markdown("**Digitalización de Planta Productiva** | Sensores: DHT22 + MPU6050")
+# -------------------------------------------------
+st.markdown('<h1 class="main-header">Factory Extreme Manufacturing – Celda de Secado</h1>', unsafe_allow_html=True)
 
-# ========================
-# SIDEBAR
-# ========================
+# -------------------------------------------------
+# SIDEBAR (solo controles)
+# -------------------------------------------------
 with st.sidebar:
-    st.title("Controls del Sistema")
-    range_hours = st.slider("Rango de Tiempo (horas)", 1, 168, 24)
-    auto_refresh = st.checkbox("Actualización Automática (30s)")
+    st.title("Controls")
+    range_hours = st.slider("Rango (horas)", 1, 168, 24)
+    auto_refresh = st.checkbox("Auto-refresh (30 s)")
 
-    st.markdown("---")
-    st.markdown("### Variables Disponibles")
-    st.markdown("- **DHT22**: Temp, Humedad, Sensación Térmica")
-    st.markdown("- **MPU6050**: Aceleración (X,Y,Z), Giro (X,Y,Z)")
-
-    if st.button("Recargar Datos"):
+    if st.button("Recargar"):
         st.cache_data.clear()
 
-    st.markdown("---")
-    st.markdown("### Soporte")
-    st.markdown("Email: soporte@extreme.com")
-    st.markdown("Tel: +57 300 123 4567")
-
-# ========================
+# -------------------------------------------------
 # CARGAR DATOS
-# ========================
-with st.spinner("Consultando sensores en tiempo real..."):
+# -------------------------------------------------
+with st.spinner("Cargando datos…"):
     df = get_data(range_hours)
 
 if df.empty:
-    st.warning("No hay datos disponibles. Verifica la conexión o el rango.")
+    st.warning("No hay datos en el rango seleccionado.")
     st.stop()
 
-# Resample para gráficos
-df_resampled = df.resample('1min').mean()
+df_resampled = df.resample("1min").mean()
 
-# ========================
-# ESTADO GENERAL
-# ========================
-st.markdown("## System Status Estado del Sistema")
-
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.markdown('<div class="alert-low"><strong>Green Sistemas Activos</strong><br>DHT22 + MPU6050</div>', unsafe_allow_html=True)
-with col2:
-    st.markdown('<div class="alert-low"><strong>Yellow Alertas</strong><br>0 pendientes</div>', unsafe_allow_html=True)
-with col3:
-    vib_rms = np.sqrt(np.mean((df[['accel_x', 'accel_y', 'accel_z']]**2).sum(axis=1)))
-    st.markdown(f'<div class="alert-low"><strong>Vibration Vibración</strong><br>{vib_rms:.3f} g RMS</div>', unsafe_allow_html=True)
-with col4:
-    st.markdown(f'<div class="alert-low"><strong>Uptime</strong><br>100% (últimas {range_hours}h)</div>', unsafe_allow_html=True)
-
-# ========================
+# -------------------------------------------------
 # MÉTRICAS EN VIVO
-# ========================
-st.markdown("## Real-Time Métricas en Tiempo Real")
-
+# -------------------------------------------------
+st.markdown("## Real-Time Métricas")
 latest = df.iloc[-1]
 cols = st.columns(4)
 
-metricas = [
+metrics = [
     ("Temperatura", "temperature", "°C", (20, 40), (15, 45)),
     ("Humedad", "humidity", "%", (30, 70), (20, 80)),
     ("Sensación Térmica", "heat_index", "°C", (20, 45), (15, 50)),
     ("Vibración RMS", None, "g", (0, 1.0), (0, 1.5))
 ]
 
-for i, (nombre, campo, unidad, bueno, warning) in enumerate(metricas):
+for i, (lbl, field, unit, good, warn) in enumerate(metrics):
     with cols[i]:
-        if campo:
-            valor = latest.get(campo)
-            valor = valor if pd.notna(valor) else 0
+        if field:
+            val = latest.get(field)
+            val = val if pd.notna(val) else 0.0
         else:
-            valor = np.sqrt(np.mean((df[['accel_x', 'accel_y', 'accel_z']].iloc[-1]**2).sum()))
+            # RMS de aceleración
+            val = np.sqrt((df[["accel_x","accel_y","accel_z"]].iloc[-1]**2).sum())
 
         # Estado
-        if bueno[0] <= valor <= bueno[1]:
-            estado, clase = "Normal", "status-good"
-        elif warning[0] <= valor <= warning[1]:
-            estado, clase = "Advertencia", "status-warning"
+        if good[0] <= val <= good[1]:
+            st_class = "status-good"
+            status = "Normal"
+        elif warn[0] <= val <= warn[1]:
+            st_class = "status-warning"
+            status = "Advertencia"
         else:
-            estado, clase = "Crítico", "status-critical"
+            st_class = "status-critical"
+            status = "Crítico"
 
-        st.metric(nombre, f"{valor:.2f} {unidad}")
-        st.markdown(f'<div class="{clase}">{estado}</div>', unsafe_allow_html=True)
+        st.metric(lbl, f"{val:.2f} {unit}")
+        st.markdown(f'<div class="{st_class}">{status}</div>', unsafe_allow_html=True)
 
-# ========================
-# GRÁFICOS
-# ========================
-st.markdown("## Trends Tendencias de Variables")
-
-# DHT22: Temp + Humedad + Sensación
+# -------------------------------------------------
+# GRÁFICOS DHT22
+# -------------------------------------------------
+st.markdown("## DHT22 – Condiciones Ambientales")
 fig_dht = go.Figure()
-fig_dht.add_trace(go.Scatter(x=df_resampled.index, y=df_resampled['temperature'], name='Temperatura', line=dict(color='red')))
-fig_dht.add_trace(go.Scatter(x=df_resampled.index, y=df_resampled['humidity'], name='Humedad', yaxis='y2', line=dict(color='blue')))
-fig_dht.add_trace(go.Scatter(x=df_resampled.index, y=df_resampled['heat_index'], name='Sensación Térmica', line=dict(color='orange', dash='dot')))
+fig_dht.add_trace(go.Scatter(x=df_resampled.index, y=df_resampled["temperature"],
+                             name="Temperatura", line=dict(color="red")))
+fig_dht.add_trace(go.Scatter(x=df_resampled.index, y=df_resampled["humidity"],
+                             name="Humedad", yaxis="y2", line=dict(color="blue")))
+fig_dht.add_trace(go.Scatter(x=df_resampled.index, y=df_resampled["heat_index"],
+                             name="Sensación Térmica", line=dict(color="orange", dash="dot")))
 fig_dht.update_layout(
-    title="DHT22 - Condiciones Ambientales",
+    title="DHT22",
     yaxis=dict(title="°C"),
     yaxis2=dict(title="%", overlaying="y", side="right"),
     hovermode="x unified"
 )
 st.plotly_chart(fig_dht, use_container_width=True)
 
-# MPU6050: Vibración 3D
-fig_mpu = go.Figure()
-for axis, color in zip(['accel_x', 'accel_y', 'accel_z'], ['red', 'green', 'blue']):
-    fig_mpu.add_trace(go.Scatter(x=df_resampled.index, y=df_resampled[axis], name=f'Aceleración {axis[-1].upper()}', line=dict(color=color)))
-fig_mpu.update_layout(title="MPU6050 - Aceleración (g)", hovermode="x unified")
-st.plotly_chart(fig_mpu, use_container_width=True)
+# -------------------------------------------------
+# GRÁFICOS MPU6050 – ACELERACIÓN
+# -------------------------------------------------
+st.markdown("## MPU6050 – Aceleración")
+fig_acc = go.Figure()
+for ax, col in zip(["X","Y","Z"], ["red","green","blue"]):
+    fig_acc.add_trace(go.Scatter(x=df_resampled.index, y=df_resampled[f"accel_{ax.lower()}"],
+                                 name=f"Aceleración {ax}", line=dict(color=col)))
+fig_acc.update_layout(title="Aceleración (g)", hovermode="x unified")
+st.plotly_chart(fig_acc, use_container_width=True)
 
-# Giroscopio
-fig_gyro = go.Figure()
-for axis, color in zip(['gyro_x', 'gyro_y', 'gyro_z'], ['purple', 'orange', 'cyan']):
-    fig_gyro.add_trace(go.Scatter(x=df_resampled.index, y=df_resampled[axis], name=f'Giro {axis[-1].upper()}', line=dict(color=color)))
-fig_gyro.update_layout(title="MPU6050 - Giroscopio (°/s)", hovermode="x unified")
-st.plotly_chart(fig_gyro, use_container_width=True)
+# -------------------------------------------------
+# GRÁFICOS MPU6050 – GIROSCOPIO
+# -------------------------------------------------
+st.markdown("## MPU6050 – Giroscopio")
+fig_gyr = go.Figure()
+for ax, col in zip(["X","Y","Z"], ["purple","orange","cyan"]):
+    fig_gyr.add_trace(go.Scatter(x=df_resampled.index, y=df_resampled[f"gyro_{ax.lower()}"],
+                                 name=f"Giro {ax}", line=dict(color=col)))
+fig_gyr.update_layout(title="Giro (°/s)", hovermode="x unified")
+st.plotly_chart(fig_gyr, use_container_width=True)
 
-# ========================
-# ANÁLISIS PREDICTIVO
-# ========================
-st.markdown("## Predictive Análisis Predictivo: Promedio Móvil + Anomalías")
+# -------------------------------------------------
+# ANÁLISIS PREDICTIVO (Promedio móvil + anomalías)
+# -------------------------------------------------
+st.markdown("## Predictive Análisis Predictivo")
+window = st.slider("Ventana promedio móvil (min)", 5, 60, 15)
+df_ma  = df_resampled.rolling(f"{window}T").mean()
+df_std = df_resampled.rolling(f"{window}T").std()
 
-window = st.slider("Ventana de promedio móvil (min)", 5, 60, 15)
-df_ma = df_resampled.rolling(f'{window}T').mean()
-df_std = df_resampled.rolling(f'{window}T').std()
+# Anomalías en temperatura
+mask_temp = (df_resampled["temperature"] > df_ma["temperature"] + 2.5*df_std["temperature"]) | \
+            (df_resampled["temperature"] < df_ma["temperature"] - 2.5*df_std["temperature"])
 
-anomalies = pd.DataFrame()
-for col in ['temperature', 'accel_x']:
-    upper = df_ma[col] + 2.5 * df_std[col]
-    lower = df_ma[col] - 2.5 * df_std[col]
-    mask = (df_resampled[col] > upper) | (df_resampled[col] < lower)
-    if mask.any():
-        anomalies = pd.concat([anomalies, df_resampled[mask][[col]]])
+# RMS vibración
+vib_rms = (df_resampled[["accel_x","accel_y","accel_z"]]**2).sum(axis=1).apply(np.sqrt)
+ma_vib  = vib_rms.rolling(f"{window}T").mean()
+std_vib = vib_rms.rolling(f"{window}T").std()
+mask_vib = (vib_rms > ma_vib + 2.5*std_vib) | (vib_rms < ma_vib - 2.5*std_vib)
 
 col1, col2 = st.columns(2)
 with col1:
     fig_temp = go.Figure()
-    fig_temp.add_trace(go.Scatter(x=df_resampled.index, y=df_resampled['temperature'], name='Real'))
-    fig_temp.add_trace(go.Scatter(x=df_ma.index, y=df_ma['temperature'], name='Promedio', line=dict(dash='dash')))
-    if 'temperature' in anomalies.columns:
-        fig_temp.add_trace(go.Scatter(x=anomalies.index, y=anomalies['temperature'], mode='markers', name='Anomalía', marker=dict(color='red', size=8)))
-    fig_temp.update_layout(title=f"Temperatura - Ventana {window} min")
+    fig_temp.add_trace(go.Scatter(x=df_resampled.index, y=df_resampled["temperature"], name="Real"))
+    fig_temp.add_trace(go.Scatter(x=df_ma.index, y=df_ma["temperature"], name="Promedio", line=dict(dash="dash")))
+    if mask_temp.any():
+        fig_temp.add_trace(go.Scatter(x=df_resampled[mask_temp].index,
+                                      y=df_resampled[mask_temp]["temperature"],
+                                      mode="markers", name="Anomalía", marker=dict(color="red", size=8)))
+    fig_temp.update_layout(title=f"Temperatura – {window} min")
     st.plotly_chart(fig_temp, use_container_width=True)
 
 with col2:
-    vib_series = (df_resampled[['accel_x', 'accel_y', 'accel_z']]**2).sum(axis=1).sqrt()
-    ma_vib = vib_series.rolling(f'{window}T').mean()
-    std_vib = vib_series.rolling(f'{window}T').std()
     fig_vib = go.Figure()
-    fig_vib.add_trace(go.Scatter(x=vib_series.index, y=vib_series, name='RMS'))
-    fig_vib.add_trace(go.Scatter(x=ma_vib.index, y=ma_vib, name='Promedio', line=dict(dash='dash')))
+    fig_vib.add_trace(go.Scatter(x=vib_rms.index, y=vib_rms, name="RMS"))
+    fig_vib.add_trace(go.Scatter(x=ma_vib.index, y=ma_vib, name="Promedio", line=dict(dash="dash")))
+    if mask_vib.any():
+        fig_vib.add_trace(go.Scatter(x=vib_rms[mask_vib].index,
+                                     y=vib_rms[mask_vib],
+                                     mode="markers", name="Anomalía", marker=dict(color="red", size=8)))
+    fig_vib.update_layout(title=f"Vibración RMS – {window} min")
     st.plotly_chart(fig_vib, use_container_width=True)
 
-st.warning(f"**Anomalías detectadas:** {len(anomalies)}")
+st.warning(f"Anomalías detectadas: {mask_temp.sum() + mask_vib.sum()}")
 
-# ========================
-# ESTADÍSTICAS
-# ========================
-st.markdown("## Summary Resumen del Período")
+# -------------------------------------------------
+# RESUMEN ESTADÍSTICO
+# -------------------------------------------------
+st.markdown("## Summary Resumen")
 stats = df.describe().round(2).T
-stats['unidad'] = ['°C', '%', '°C', 'g', 'g', 'g', '°/s', '°/s', '°/s']
-st.dataframe(stats[['mean', 'std', 'min', 'max', 'unidad']], use_container_width=True)
+units = ["°C","%","°C","g","g","g","°/s","°/s","°/s"]
+stats["unidad"] = units
+st.dataframe(stats[["mean","std","min","max","unidad"]], use_container_width=True)
 
-# ========================
-# AUTO REFRESH
-# ========================
+# -------------------------------------------------
+# AUTO-REFRESH
+# -------------------------------------------------
 if auto_refresh:
     time.sleep(30)
     st.rerun()
 
-# ========================
+# -------------------------------------------------
 # FOOTER
-# ========================
+# -------------------------------------------------
 st.markdown("---")
-colf1, colf2, colf3 = st.columns(3)
-with colf1:
-    st.markdown("**Proyecto Final - Digitalización de Plantas**")
-with colf2:
+c1, c2 = st.columns(2)
+with c1:
+    st.markdown("**Proyecto Final – Digitalización de Plantas**")
+with c2:
     st.markdown(f"**Última actualización:** {datetime.now().strftime('%H:%M:%S')}")
-with colf3:
-    st.markdown("**Conexión:** Green En línea")
