@@ -8,22 +8,25 @@ import os
 # =============================
 
 st.set_page_config(
-    page_title="Dashboard de Sensores",
+    page_title="Dashboard de Sensores IMU",
     page_icon="📊",
     layout="wide",
 )
 
+st.title("📊 Dashboard de Sensores IMU")
+st.markdown("Visualización comparativa de datos provenientes de **InfluxDB** para ambos sensores.")
+
 # =============================
-# VARIABLES DE CONEXIÓN
+# CONFIGURACIÓN DE INFLUXDB
 # =============================
 
 INFLUX_URL = os.getenv("INFLUX_URL", "https://us-east-1-1.aws.cloud2.influxdata.com")
-INFLUX_TOKEN = os.getenv("INFLUX_TOKEN", "TU_TOKEN_AQUI")
+INFLUX_TOKEN = os.getenv("INFLUX_TOKEN", "TU_TOKEN_AQUI")  # ⚠️ Reemplaza por tu token válido
 INFLUX_ORG = os.getenv("INFLUX_ORG", "0925ccf91ab36478")
 INFLUX_BUCKET = os.getenv("INFLUX_BUCKET", "data")
 
 # =============================
-# FUNCIÓN DE CONEXIÓN Y CONSULTA
+# FUNCIÓN PARA CARGAR DATOS
 # =============================
 
 def cargar_datos(sensor: str, rango_dias: int = 3) -> pd.DataFrame:
@@ -41,12 +44,12 @@ def cargar_datos(sensor: str, rango_dias: int = 3) -> pd.DataFrame:
           |> yield(name: "mean")
         '''
 
-        tables = query_api.query_data_frame(query)
+        result = query_api.query_data_frame(query)
 
-        if isinstance(tables, list) and len(tables) > 0:
-            df = pd.concat(tables)
-        elif isinstance(tables, pd.DataFrame):
-            df = tables
+        if isinstance(result, list) and len(result) > 0:
+            df = pd.concat(result)
+        elif isinstance(result, pd.DataFrame):
+            df = result
         else:
             return pd.DataFrame()
 
@@ -55,71 +58,71 @@ def cargar_datos(sensor: str, rango_dias: int = 3) -> pd.DataFrame:
 
         df["_time"] = pd.to_datetime(df["_time"])
         df = df.sort_values("_time")
+        df["sensor"] = sensor
 
         return df
 
     except Exception as e:
-        st.error(f"Error conectando con InfluxDB: {e}")
+        st.error(f"Error conectando con InfluxDB ({sensor}): {e}")
         return pd.DataFrame()
 
 # =============================
-# INTERFAZ PRINCIPAL
+# PARÁMETROS DE DASHBOARD
 # =============================
 
-st.title("📊 Dashboard de Sensores IMU")
-st.markdown("Visualización de datos provenientes de InfluxDB.")
+rango_dias = 3  # fijo, puedes cambiarlo a 7 o 30
 
-# Selección de sensor y rango de tiempo
-col1, col2 = st.columns(2)
-with col1:
-    sensor = st.selectbox("Selecciona un sensor:", ["Sensor_1", "Sensor_2"])
-with col2:
-    rango_dias = st.slider("Selecciona rango de tiempo (días):", 1, 30, 3)
+# Cargar ambos sensores
+df1 = cargar_datos("Sensor_1", rango_dias)
+df2 = cargar_datos("Sensor_2", rango_dias)
 
-# =============================
-# CARGA DE DATOS
-# =============================
-
-df = cargar_datos(sensor, rango_dias)
+# Combinar datos
+df = pd.concat([df1, df2], ignore_index=True)
 
 if df.empty:
-    st.warning("⚠️ No se encontraron datos en el rango seleccionado.")
+    st.warning("⚠️ No se encontraron datos en el rango seleccionado para ninguno de los sensores.")
     st.stop()
 
 # =============================
 # VISUALIZACIÓN DE DATOS
 # =============================
 
-st.subheader("📈 Evolución temporal")
-fields = df["_field"].unique()
+st.subheader("📈 Evolución temporal comparativa")
 
-for field in fields:
-    serie = df[df["_field"] == field].set_index("_time")["_value"]
+for eje in ["accel_x", "accel_y", "accel_z"]:
+    st.markdown(f"### {eje.upper()}")
 
-    if serie.empty:
+    # Pivotar para mostrar ambos sensores en una misma gráfica
+    df_eje = df[df["_field"] == eje].pivot(index="_time", columns="sensor", values="_value")
+
+    if df_eje.empty:
+        st.warning(f"No hay datos disponibles para {eje}")
         continue
 
-    st.markdown(f"**{field}**")
-    st.line_chart(serie)
+    st.line_chart(df_eje)
 
 # =============================
-# ÚLTIMOS VALORES
+# ÚLTIMOS VALORES REGISTRADOS
 # =============================
 
 st.subheader("📄 Últimos valores registrados")
 
-últimos = df.sort_values("_time", ascending=False).groupby("_field").head(1)
-for _, fila in últimos.iterrows():
-    st.metric(
-        label=fila["_field"],
-        value=f"{fila['_value']:.2f}",
-        delta=None,
-    )
+últimos = df.sort_values("_time", ascending=False).groupby(["sensor", "_field"]).head(1)
+col1, col2 = st.columns(2)
+
+with col1:
+    st.markdown("#### Sensor_1")
+    for _, fila in últimos[últimos["sensor"] == "Sensor_1"].iterrows():
+        st.metric(fila["_field"], f"{fila['_value']:.2f}")
+
+with col2:
+    st.markdown("#### Sensor_2")
+    for _, fila in últimos[últimos["sensor"] == "Sensor_2"].iterrows():
+        st.metric(fila["_field"], f"{fila['_value']:.2f}")
 
 # =============================
 # TABLA FINAL
 # =============================
 
-st.subheader("📋 Tabla de datos")
-st.dataframe(df[["_time", "_field", "_value", "sensor"]].tail(100))
-
+st.subheader("📋 Últimos datos combinados")
+st.dataframe(df[["_time", "sensor", "_field", "_value"]].tail(100))
