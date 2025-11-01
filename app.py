@@ -104,25 +104,42 @@ if df.empty:
     st.stop()
 
 # ========================
-# MÉTRICAS EN VIVO
+# MÉTRICAS EN VIVO (con manejo de NaN y valores faltantes)
 # ========================
-latest = df.iloc[-1]
-prev_temp = df['temperature'].iloc[-2] if len(df) > 1 else latest['temperature']
-prev_hum = df['humidity'].iloc[-2] if len(df) > 1 else latest['humidity']
+if df.empty or len(df) == 0:
+    st.warning("No hay datos disponibles para mostrar métricas.")
+else:
+    latest = df.iloc[-1]
 
-col1, col2, col3 = st.columns(3)
-with col1:
-    st.metric(
-        "Temperatura",
-        f"{latest['temperature']:.2f} °C",
-        delta=f"{latest['temperature'] - prev_temp:+.2f} °C"
-    )
-with col2:
-    st.metric(
-        "Humedad",
-        f"{latest['humidity']:.1f} %",
-        delta=f"{latest['humidity'] - prev_hum:+.1f} %"
-    )
+    # Valores seguros (con fallback)
+    temp_val = latest.get('temperature')
+    hum_val = latest.get('humidity')
+    vib_rms = np.sqrt(np.mean(df['vibration']**2)) if 'vibration' in df.columns and not df['vibration'].isna().all() else 0
+
+    # Deltas (solo si hay al menos 2 puntos)
+    delta_temp = None
+    delta_hum = None
+    if len(df) > 1:
+        prev_temp = df['temperature'].iloc[-2] if 'temperature' in df.columns else temp_val
+        prev_hum = df['humidity'].iloc[-2] if 'humidity' in df.columns else hum_val
+        if pd.notna(temp_val) and pd.notna(prev_temp):
+            delta_temp = f"{temp_val - prev_temp:+.2f} °C"
+        if pd.notna(hum_val) and pd.notna(prev_hum):
+            delta_hum = f"{hum_val - prev_hum:+.1f} %"
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        temp_display = f"{temp_val:.2f} °C" if pd.notna(temp_val) else "N/D"
+        st.metric("Temperatura", temp_display, delta=delta_temp)
+
+    with col2:
+        hum_display = f"{hum_val:.1f} %" if pd.notna(hum_val) else "N/D"
+        st.metric("Humedad", hum_display, delta=delta_hum)
+
+    with col3:
+        vib_display = f"{vib_rms:.3f} g" if pd.notna(vib_rms) else "N/D"
+        st.metric("Vibración (RMS)", vib_display)
 
 # ========================
 # GRÁFICAS
