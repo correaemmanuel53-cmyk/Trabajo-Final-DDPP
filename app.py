@@ -96,7 +96,7 @@ if df.empty:
 # ========================
 latest = df.iloc[-1]
 prev_temp = df['temperature'].iloc[-2] if len(df) > 1 else latest['temperature']
-prev_hum = df['humidity'].iloc[-2] if len(df) diagonally > 1 else latest['humidity']
+prev_hum = df['humidity'].iloc[-2] if len(df) > 1 else latest['humidity']
 
 col1, col2, col3 = st.columns(3)
 with col1:
@@ -111,9 +111,6 @@ with col2:
         f"{latest['humidity']:.1f} %",
         delta=f"{latest['humidity'] - prev_hum:+.1f} %"
     )
-with col3:
-    vib_rms = np.sqrt(np.mean(df['vibration']**2))
-    st.metric("Vibración (RMS)", f"{vib_rms:.3f} g")
 
 # ========================
 # GRÁFICAS
