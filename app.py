@@ -38,10 +38,21 @@ def get_data(days: int):
           |> filter(fn: (r) => r["_measurement"] == "sensor_data")
           |> filter(fn: (r) => r["_field"] == "temperatura" or r["_field"] == "humedad" or r["_field"] == "sensacion")
         '''
-        tables = query_api.query_data_frame(org=INFLUXDB_ORG, query=query)
-        df = pd.concat(tables)
+        result = query_api.query_data_frame(org=INFLUXDB_ORG, query=query)
+
+        # ✅ Maneja lista o único DataFrame correctamente
+        if isinstance(result, list):
+            df = pd.concat(result, ignore_index=True)
+        else:
+            df = result
+
+        # Validación de datos
+        if df is None or df.empty:
+            return pd.DataFrame()
+
         df["_time"] = pd.to_datetime(df["_time"])
         return df
+
     except Exception as e:
         st.error(f"Error conectando con InfluxDB: {e}")
         return pd.DataFrame()
@@ -60,7 +71,7 @@ rango_dias = st.sidebar.slider(
 df = get_data(rango_dias)
 
 if df.empty:
-    st.warning("No se encontraron datos en el rango seleccionado.")
+    st.warning("⚠️ No se encontraron datos en el rango seleccionado.")
     st.stop()
 
 # =========================
@@ -74,6 +85,7 @@ ultima_sens = df_latest[df_latest["_field"] == "sensacion"]["_value"].values[0]
 
 # Cambios respecto al valor anterior (último menos penúltimo)
 df_sorted = df.sort_values("_time")
+
 def cambio_campo(campo):
     vals = df_sorted[df_sorted["_field"] == campo]["_value"].tail(2).values
     return vals[-1] - vals[-2] if len(vals) == 2 else 0
@@ -83,47 +95,9 @@ cambio_hum = cambio_campo("humedad")
 cambio_sens = cambio_campo("sensacion")
 
 # =========================
-# TARJETAS DE INDICADORES
+# ESTILO VISUAL
 # =========================
-st.subheader("📊 Estado Actual de Variables Ambientales")
-
-col1, col2, col3 = st.columns(3)
-with col1:
-    st.metric("Temperatura", f"{ultima_temp:.1f} °C", f"{cambio_temp:+.1f}")
-with col2:
-    st.metric("Humedad", f"{ultima_hum:.1f} %", f"{cambio_hum:+.1f}")
-with col3:
-    st.metric("Sensación", f"{ultima_sens:.1f} °C", f"{cambio_sens:+.1f}")
-
-st.markdown("---")
-
-# =========================
-# GRÁFICOS Y TABLA
-# =========================
-st.subheader("📈 Evolución temporal")
-
-tabs = st.tabs(["Temperatura", "Humedad", "Sensación", "Tabla de datos"])
-
-with tabs[0]:
-    st.line_chart(
-        df[df["_field"] == "temperatura"].set_index("_time")["_value"],
-        key="chart_temp"
-    )
-with tabs[1]:
-    st.line_chart(
-        df[df["_field"] == "humedad"].set_index("_time")["_value"],
-        key="chart_hum"
-    )
-with tabs[2]:
-    st.line_chart(
-        df[df["_field"] == "sensacion"].set_index("_time")["_value"],
-        key="chart_sens"
-    )
-with tabs[3]:
-    st.dataframe(
-        df[["_time", "_field", "_value"]],
-        use_container_width=True,
-        key="tabla_final"
-    )
-
-st.success("Dashboard actualizado correctamente ✅")
+st.markdown("""
+<style>
+    body, .stApp {
+        bac
