@@ -43,26 +43,38 @@ query_api = client.query_api()
 # ========================
 # FUNCIÓN PARA OBTENER DATOS
 # ========================
-@st.cache_data(ttl=60)  # Cache por 60 segundos
+@st.cache_data(ttl=60)
 def get_data(range_hours=24):
     query = f'''
     from(bucket: "{INFLUXDB_BUCKET}")
       |> range(start: -{range_hours}h)
       |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
-      |> keep(columns: ["_time", "temperature", "humidity", "vibration"])
     '''
     try:
-        tables = query_api.query(org=INFLUXDB_ORG, query=query)
-        if not tables or len(tables) == 0 or len(tables[0].records) == 0:
-            st.warning("No hay datos disponibles en el rango seleccionado.")
+        result = query_api.query(org=INFLUXDB_ORG, query=query)
+        data = []
+        for table in result:
+            for record in table.records:
+                row = {
+                    "_time": record.get_time(),
+                    "temperature": record.values.get("temperature"),
+                    "humidity": record.values.get("humidity"),
+                    "vibration": record.values.get("vibration")
+                }
+                data.append(row)
+        
+        if not data:
+            st.warning("No hay datos en el rango seleccionado.")
             return pd.DataFrame()
 
-        df = tables[0].to_pandas()
+        df = pd.DataFrame(data)
         df['_time'] = pd.to_datetime(df['_time'])
         df = df.set_index('_time').sort_index()
+        df = df[['temperature', 'humidity', 'vibration']].dropna(how='all')
         return df
+
     except Exception as e:
-        st.error(f"Error de conexión con InfluxDB: {str(e)}")
+        st.error(f"Error al conectar con InfluxDB: {e}")
         return pd.DataFrame()
 
 # ========================
