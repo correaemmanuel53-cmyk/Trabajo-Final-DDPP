@@ -100,4 +100,64 @@ cambio_sens = cambio_campo("sensacion")
 st.markdown("""
 <style>
     body, .stApp {
-        bac
+        background-color: #ffffff;
+        color: #000000;
+    }
+    .stMetric {
+        background-color: #f5fff5;
+        border: 1px solid #00aa55;
+        border-radius: 10px;
+        padding: 10px;
+        box-shadow: 2px 2px 6px rgba(0,0,0,0.1);
+    }
+    h1, h2, h3, .stMarkdown, .stSubheader {
+        color: #000000 !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# =========================
+# TARJETAS DE INDICADORES
+# =========================
+st.subheader("📊 Estado Actual de Variables Ambientales")
+
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.metric("Temperatura", f"{ultima_temp:.1f} °C", f"{cambio_temp:+.1f}")
+with col2:
+    st.metric("Humedad", f"{ultima_hum:.1f} %", f"{cambio_hum:+.1f}")
+with col3:
+    st.metric("Sensación", f"{ultima_sens:.1f} °C", f"{cambio_sens:+.1f}")
+
+st.markdown("---")
+
+# =========================
+# GRÁFICOS Y TABLA
+# =========================
+st.subheader("📈 Evolución temporal")
+
+tabs = st.tabs(["Temperatura", "Humedad", "Sensación", "Tabla de datos"])
+
+with tabs[0]:
+    st.line_chart(
+        df[df["_field"] == "temperatura"].set_index("_time")["_value"],
+        key="chart_temp"
+    )
+with tabs[1]:
+    st.line_chart(
+        df[df["_field"] == "humedad"].set_index("_time")["_value"],
+        key="chart_hum"
+    )
+with tabs[2]:
+    st.line_chart(
+        df[df["_field"] == "sensacion"].set_index("_time")["_value"],
+        key="chart_sens"
+    )
+with tabs[3]:
+    st.dataframe(
+        df[["_time", "_field", "_value"]],
+        use_container_width=True,
+        key="tabla_final"
+    )
+
+st.success("✅ Dashboard actualizado correctamente")
