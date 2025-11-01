@@ -40,14 +40,20 @@ def get_data(days: int):
         '''
         result = query_api.query_data_frame(org=INFLUXDB_ORG, query=query)
 
-        # ✅ Maneja lista o único DataFrame correctamente
+        # 🧩 Bloque temporal de diagnóstico
         if isinstance(result, list):
+            st.info(f"🔍 {len(result)} tablas encontradas en la respuesta de InfluxDB.")
+            if len(result) > 0:
+                st.dataframe(result[0].head(), use_container_width=True)
             df = pd.concat(result, ignore_index=True)
         else:
+            st.info("📄 InfluxDB devolvió un solo DataFrame.")
+            st.dataframe(result.head(), use_container_width=True)
             df = result
 
         # Validación de datos
         if df is None or df.empty:
+            st.warning("⚠️ La consulta no devolvió resultados. Revisa filtros o rango de fechas.")
             return pd.DataFrame()
 
         df["_time"] = pd.to_datetime(df["_time"])
