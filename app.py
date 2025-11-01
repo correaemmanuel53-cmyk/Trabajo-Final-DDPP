@@ -1,291 +1,129 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
+from datetime import datetime, timedelta
 from influxdb_client import InfluxDBClient
 from dotenv import load_dotenv
 import os
 
-# Cargar variables del archivo .env
+# =========================
+# CONFIGURACIÓN GENERAL
+# =========================
+st.set_page_config(page_title="Dashboard Sensorial", layout="wide")
 load_dotenv()
 
-# Credenciales desde variables de entorno
+# Variables desde .env
 INFLUXDB_URL = os.getenv("INFLUXDB_URL")
 INFLUXDB_TOKEN = os.getenv("INFLUXDB_TOKEN")
 INFLUXDB_ORG = os.getenv("INFLUXDB_ORG")
 INFLUXDB_BUCKET = os.getenv("INFLUXDB_BUCKET")
 
-# Configurar conexión con InfluxDB
-client = InfluxDBClient(
-    url=INFLUXDB_URL,
-    token=INFLUXDB_TOKEN,
-    org=INFLUXDB_ORG
-)
-query_api = client.query_api()
-
-# -----------------------------------
-# CONFIGURACIÓN GENERAL
-# -----------------------------------
-st.set_page_config(page_title="Dashboard Planta Productiva", layout="wide")
-
-# Estilos CSS personalizados
-st.markdown("""
-    <style>
-    body {
-        background-color: #ffffff;
-        color: #000000;
-    }
-    .title {
-        color: #000000;
-        text-align: center;
-        font-size: 32px;
-        font-weight: bold;
-        margin-bottom: 15px;
-    }
-    .card {
-        background-color: #ffffff;
-        border: 2px solid #007B3E;
-        border-radius: 10px;
-        padding: 20px;
-        box-shadow: 2px 2px 10px rgba(0,0,0,0.1);
-        margin-bottom: 25px;
-    }
-    h3 {
-        color: #007B3E;
-        text-align: center;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# -----------------------------------
+# =========================
 # CONEXIÓN CON INFLUXDB
-# -----------------------------------
-try:
-    INFLUXDB_URL = st.secrets["INFLUXDB_URL"]
-    INFLUXDB_TOKEN = st.secrets["INFLUXDB_TOKEN"]
-    INFLUXDB_ORG = st.secrets["INFLUXDB_ORG"]
-    INFLUXDB_BUCKET = st.secrets["INFLUXDB_BUCKET"]
-except:
-    st.error("⚠️ No se encontraron las credenciales. Configúralas en *Secrets* de Streamlit Cloud.")
-    st.stop()
-
-client = InfluxDBClient(
-    url=INFLUXDB_URL,
-    token=INFLUXDB_TOKEN,
-    org=INFLUXDB_ORG
-)
-query_api = client.query_api()
-
-# -----------------------------------
-# TÍTULO
-# -----------------------------------
-st.markdown('<div class="title">📊 Dashboard — Planta Productiva</div>', unsafe_allow_html=True)
-st.markdown("Visualización de datos en tiempo real desde sensores **DHT22** y **MPU6050**.")
-
-# -----------------------------------
-# CONTROLES
-# -----------------------------------
-rango = st.slider("Selecciona rango de tiempo (días):", 1, 30, 3)
-
-# -----------------------------------
-# CONSULTAS
-# -----------------------------------
-def consultar_datos(sensor):
+# =========================
+@st.cache_data(ttl=300)
+def get_data(days: int):
+    """Obtiene datos de los últimos N días desde InfluxDB."""
     try:
-        if sensor == "DHT22":
-            query = f'''
-            from(bucket: "{INFLUXDB_BUCKET}")
-                |> range(start: -{rango}d)
-                |> filter(fn: (r) => r._measurement == "studio-dht22")
-                |> filter(fn: (r) => r._field == "temperatura" or r._field == "humedad" or r._field == "sensacion_termica")
-            '''
-        else:
-            query = f'''
-            from(bucket: "{INFLUXDB_BUCKET}")
-                |> range(start: -{rango}d)
-                |> filter(fn: (r) => r._measurement == "mpu6050")
-                |> filter(fn: (r) =>
-                    r._field == "accel_x" or r._field == "accel_y" or r._field == "accel_z" or
-                    r._field == "gyro_x" or r._field == "gyro_y" or r._field == "gyro_z" or
-                    r._field == "temperature")
-            '''
-        df = query_api.query_data_frame(org=INFLUXDB_ORG, query=query)
-        if isinstance(df, list):
-            df = pd.concat(df)
-        df = df[["_time", "_field", "_value"]]
-        df.rename(columns={"_time": "Tiempo", "_field": "Variable", "_value": "Valor"}, inplace=True)
-        df["Tiempo"] = pd.to_datetime(df["Tiempo"])
+        client = InfluxDBClient(
+            url=INFLUXDB_URL,
+            token=INFLUXDB_TOKEN,
+            org=INFLUXDB_ORG
+        )
+        query_api = client.query_api()
+
+        start_time = datetime.utcnow() - timedelta(days=days)
+        query = f'''
+        from(bucket: "{INFLUXDB_BUCKET}")
+          |> range(start: {start_time.isoformat()}Z)
+          |> filter(fn: (r) => r["_measurement"] == "sensor_data")
+          |> filter(fn: (r) => r["_field"] == "temperatura" or r["_field"] == "humedad" or r["_field"] == "sensacion")
+        '''
+        tables = query_api.query_data_frame(org=INFLUXDB_ORG, query=query)
+        df = pd.concat(tables)
+        df["_time"] = pd.to_datetime(df["_time"])
         return df
     except Exception as e:
-        st.error(f"Error al consultar {sensor}: {e}")
+        st.error(f"Error conectando con InfluxDB: {e}")
         return pd.DataFrame()
 
-# -----------------------------------
-# CARGA DE DATOS
-# -----------------------------------
-df_dht = consultar_datos("DHT22")
-df_mpu = consultar_datos("MPU6050")
+# =========================
+# SIDEBAR DE CONTROL
+# =========================
+st.sidebar.header("Configuración de rango de tiempo")
+rango_dias = st.sidebar.slider(
+    "Selecciona rango de tiempo (días):", 1, 30, 3, key="slider_rango_dias"
+)
 
-# -----------------------------------
-# VISUALIZACIÓN
-# -----------------------------------
-col1, col2 = st.columns(2)
+# =========================
+# LECTURA DE DATOS
+# =========================
+df = get_data(rango_dias)
 
-with col1:
-    st.markdown('<div class="card"><h3>🌡️ Sensor DHT22</h3>', unsafe_allow_html=True)
-    if df_dht.empty:
-        st.warning("Sin datos de DHT22.")
-    else:
-        for var in df_dht["Variable"].unique():
-            sub_df = df_dht[df_dht["Variable"] == var]
-            fig = px.line(sub_df, x="Tiempo", y="Valor", title=var, template="plotly_white")
-            fig.update_layout(title_font_color="black", title_font_size=16, paper_bgcolor="white", plot_bgcolor="white")
-            st.plotly_chart(fig, use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-with col2:
-    st.markdown('<div class="card"><h3>⚙️ Sensor MPU6050</h3>', unsafe_allow_html=True)
-    if df_mpu.empty:
-        st.warning("Sin datos de MPU6050.")
-    else:
-        for var in df_mpu["Variable"].unique():
-            sub_df = df_mpu[df_mpu["Variable"] == var]
-            fig = px.line(sub_df, x="Tiempo", y="Valor", title=var, template="plotly_white")
-            fig.update_layout(title_font_color="black", title_font_size=16, paper_bgcolor="white", plot_bgcolor="white")
-            st.plotly_chart(fig, use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-import streamlit as st
-import pandas as pd
-from influxdb_client import InfluxDBClient
-import plotly.express as px
-
-# -----------------------------------
-# CONFIGURACIÓN GENERAL
-# -----------------------------------
-st.set_page_config(page_title="Dashboard Planta Productiva", layout="wide")
-
-# Estilos CSS personalizados
-st.markdown("""
-    <style>
-    body {
-        background-color: #ffffff;
-        color: #000000;
-    }
-    .title {
-        color: #000000;
-        text-align: center;
-        font-size: 32px;
-        font-weight: bold;
-        margin-bottom: 15px;
-    }
-    .card {
-        background-color: #ffffff;
-        border: 2px solid #007B3E;
-        border-radius: 10px;
-        padding: 20px;
-        box-shadow: 2px 2px 10px rgba(0,0,0,0.1);
-        margin-bottom: 25px;
-    }
-    h3 {
-        color: #007B3E;
-        text-align: center;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# -----------------------------------
-# CONEXIÓN CON INFLUXDB
-# -----------------------------------
-try:
-    INFLUXDB_URL = st.secrets["INFLUXDB_URL"]
-    INFLUXDB_TOKEN = st.secrets["INFLUXDB_TOKEN"]
-    INFLUXDB_ORG = st.secrets["INFLUXDB_ORG"]
-    INFLUXDB_BUCKET = st.secrets["INFLUXDB_BUCKET"]
-except:
-    st.error("⚠️ No se encontraron las credenciales. Configúralas en *Secrets* de Streamlit Cloud.")
+if df.empty:
+    st.warning("No se encontraron datos en el rango seleccionado.")
     st.stop()
 
-client = InfluxDBClient(
-    url=INFLUXDB_URL,
-    token=INFLUXDB_TOKEN,
-    org=INFLUXDB_ORG
-)
-query_api = client.query_api()
+# =========================
+# ÚLTIMOS VALORES
+# =========================
+df_latest = df.sort_values("_time").groupby("_field").tail(1)
 
-# -----------------------------------
-# TÍTULO
-# -----------------------------------
-st.markdown('<div class="title">📊 Dashboard — Planta Productiva</div>', unsafe_allow_html=True)
-st.markdown("Visualización de datos en tiempo real desde sensores **DHT22** y **MPU6050**.")
+ultima_temp = df_latest[df_latest["_field"] == "temperatura"]["_value"].values[0]
+ultima_hum = df_latest[df_latest["_field"] == "humedad"]["_value"].values[0]
+ultima_sens = df_latest[df_latest["_field"] == "sensacion"]["_value"].values[0]
 
-# -----------------------------------
-# CONTROLES
-# -----------------------------------
-rango = st.slider("Selecciona rango de tiempo (días):", 1, 30, 3)
+# Cambios respecto al valor anterior (último menos penúltimo)
+df_sorted = df.sort_values("_time")
+def cambio_campo(campo):
+    vals = df_sorted[df_sorted["_field"] == campo]["_value"].tail(2).values
+    return vals[-1] - vals[-2] if len(vals) == 2 else 0
 
-# -----------------------------------
-# CONSULTAS
-# -----------------------------------
-def consultar_datos(sensor):
-    try:
-        if sensor == "DHT22":
-            query = f'''
-            from(bucket: "{INFLUXDB_BUCKET}")
-                |> range(start: -{rango}d)
-                |> filter(fn: (r) => r._measurement == "studio-dht22")
-                |> filter(fn: (r) => r._field == "temperatura" or r._field == "humedad" or r._field == "sensacion_termica")
-            '''
-        else:
-            query = f'''
-            from(bucket: "{INFLUXDB_BUCKET}")
-                |> range(start: -{rango}d)
-                |> filter(fn: (r) => r._measurement == "mpu6050")
-                |> filter(fn: (r) =>
-                    r._field == "accel_x" or r._field == "accel_y" or r._field == "accel_z" or
-                    r._field == "gyro_x" or r._field == "gyro_y" or r._field == "gyro_z" or
-                    r._field == "temperature")
-            '''
-        df = query_api.query_data_frame(org=INFLUXDB_ORG, query=query)
-        if isinstance(df, list):
-            df = pd.concat(df)
-        df = df[["_time", "_field", "_value"]]
-        df.rename(columns={"_time": "Tiempo", "_field": "Variable", "_value": "Valor"}, inplace=True)
-        df["Tiempo"] = pd.to_datetime(df["Tiempo"])
-        return df
-    except Exception as e:
-        st.error(f"Error al consultar {sensor}: {e}")
-        return pd.DataFrame()
+cambio_temp = cambio_campo("temperatura")
+cambio_hum = cambio_campo("humedad")
+cambio_sens = cambio_campo("sensacion")
 
-# -----------------------------------
-# CARGA DE DATOS
-# -----------------------------------
-df_dht = consultar_datos("DHT22")
-df_mpu = consultar_datos("MPU6050")
+# =========================
+# TARJETAS DE INDICADORES
+# =========================
+st.subheader("📊 Estado Actual de Variables Ambientales")
 
-# -----------------------------------
-# VISUALIZACIÓN
-# -----------------------------------
-col1, col2 = st.columns(2)
-
+col1, col2, col3 = st.columns(3)
 with col1:
-    st.markdown('<div class="card"><h3>🌡️ Sensor DHT22</h3>', unsafe_allow_html=True)
-    if df_dht.empty:
-        st.warning("Sin datos de DHT22.")
-    else:
-        for var in df_dht["Variable"].unique():
-            sub_df = df_dht[df_dht["Variable"] == var]
-            fig = px.line(sub_df, x="Tiempo", y="Valor", title=var, template="plotly_white")
-            fig.update_layout(title_font_color="black", title_font_size=16, paper_bgcolor="white", plot_bgcolor="white")
-            st.plotly_chart(fig, use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
+    st.metric("Temperatura", f"{ultima_temp:.1f} °C", f"{cambio_temp:+.1f}")
 with col2:
-    st.markdown('<div class="card"><h3>⚙️ Sensor MPU6050</h3>', unsafe_allow_html=True)
-    if df_mpu.empty:
-        st.warning("Sin datos de MPU6050.")
-    else:
-        for var in df_mpu["Variable"].unique():
-            sub_df = df_mpu[df_mpu["Variable"] == var]
-            fig = px.line(sub_df, x="Tiempo", y="Valor", title=var, template="plotly_white")
-            fig.update_layout(title_font_color="black", title_font_size=16, paper_bgcolor="white", plot_bgcolor="white")
-            st.plotly_chart(fig, use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.metric("Humedad", f"{ultima_hum:.1f} %", f"{cambio_hum:+.1f}")
+with col3:
+    st.metric("Sensación", f"{ultima_sens:.1f} °C", f"{cambio_sens:+.1f}")
+
+st.markdown("---")
+
+# =========================
+# GRÁFICOS Y TABLA
+# =========================
+st.subheader("📈 Evolución temporal")
+
+tabs = st.tabs(["Temperatura", "Humedad", "Sensación", "Tabla de datos"])
+
+with tabs[0]:
+    st.line_chart(
+        df[df["_field"] == "temperatura"].set_index("_time")["_value"],
+        key="chart_temp"
+    )
+with tabs[1]:
+    st.line_chart(
+        df[df["_field"] == "humedad"].set_index("_time")["_value"],
+        key="chart_hum"
+    )
+with tabs[2]:
+    st.line_chart(
+        df[df["_field"] == "sensacion"].set_index("_time")["_value"],
+        key="chart_sens"
+    )
+with tabs[3]:
+    st.dataframe(
+        df[["_time", "_field", "_value"]],
+        use_container_width=True,
+        key="tabla_final"
+    )
+
+st.success("Dashboard actualizado correctamente ✅")
