@@ -131,7 +131,7 @@ if df.empty:
 df_resampled = df.resample("1min").mean()
 
 # -------------------------------------------------
-# MÉTRICAS EN VIVO
+# MÉTRICAS EN VIVO (CORREGIDO: RMS robusto)
 # -------------------------------------------------
 st.markdown("## Métricas en Tiempo Real")
 latest = df.iloc[-1]
@@ -148,17 +148,27 @@ for i, (lbl, field, unit, good, warn) in enumerate(metrics):
     with cols[i]:
         if field and field in latest.index:
             val = latest[field]
+            if pd.isna(val):
+                val = 0.0
         elif field:
             val = 0.0
         else:
-            accel_cols = [c for c in ["accel_x", "accel_y", "accel_z"] if c in latest.index]
-            if accel_cols:
-                val = np.sqrt(sum(latest[c]**2 for c in accel_cols))
+            # RMS de aceleración (CORREGIDO)
+            accel_cols = ["accel_x", "accel_y", "accel_z"]
+            values = []
+            for col in accel_cols:
+                if col in latest.index:
+                    v = latest[col]
+                    if pd.notna(v):
+                        values.append(v**2)
+            if values:
+                val = np.sqrt(sum(values))
             else:
                 val = 0.0
         
-        val = round(float(val), 2) if pd.notna(val) else 0.0
+        val = round(float(val), 2)
 
+        # Estado
         if good[0] <= val <= good[1]:
             st_class, status = "status-good", "Normal"
         elif warn[0] <= val <= warn[1]:
