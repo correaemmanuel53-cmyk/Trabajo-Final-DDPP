@@ -131,12 +131,18 @@ if df.empty:
 df_resampled = df.resample("1min").mean()
 
 # -------------------------------------------------
-# MÉTRICAS EN VIVO (CORREGIDO: RMS robusto)
+# MÉTRICAS EN VIVO (100% FUNCIONAL)
 # -------------------------------------------------
 st.markdown("## Métricas en Tiempo Real")
-latest = df.iloc[-1]
-cols = st.columns(4)
 
+# Última hora de medición
+last_time = df.index.max()
+if pd.notna(last_time):
+    st.caption(f"Última medición: {last_time.strftime('%d/%m %H:%M:%S')}")
+else:
+    st.caption("Sin datos disponibles")
+
+cols = st.columns(4)
 metrics = [
     ("Temperatura", "temperatura", "°C", (20, 40), (15, 45)),
     ("Humedad", "humedad", "%", (30, 70), (20, 80)),
@@ -146,29 +152,24 @@ metrics = [
 
 for i, (lbl, field, unit, good, warn) in enumerate(metrics):
     with cols[i]:
-        if field and field in latest.index:
-            val = latest[field]
-            if pd.isna(val):
+        if field:
+            if field in df.columns:
+                series = df[field].dropna()
+                val = series.iloc[-1] if not series.empty else 0.0
+            else:
                 val = 0.0
-        elif field:
-            val = 0.0
         else:
-            # RMS de aceleración (CORREGIDO)
             accel_cols = ["accel_x", "accel_y", "accel_z"]
             values = []
             for col in accel_cols:
-                if col in latest.index:
-                    v = latest[col]
-                    if pd.notna(v):
-                        values.append(v**2)
-            if values:
-                val = np.sqrt(sum(values))
-            else:
-                val = 0.0
+                if col in df.columns:
+                    series = df[col].dropna()
+                    if not series.empty:
+                        values.append(series.iloc[-1]**2)
+            val = np.sqrt(sum(values)) if values else 0.0
         
         val = round(float(val), 2)
 
-        # Estado
         if good[0] <= val <= good[1]:
             st_class, status = "status-good", "Normal"
         elif warn[0] <= val <= warn[1]:
@@ -178,7 +179,6 @@ for i, (lbl, field, unit, good, warn) in enumerate(metrics):
         
         st.metric(lbl, f"{val} {unit}")
         st.markdown(f'<div class="{st_class}">{status}</div>', unsafe_allow_html=True)
-
 # -------------------------------------------------
 # GRÁFICO DHT22
 # -------------------------------------------------
