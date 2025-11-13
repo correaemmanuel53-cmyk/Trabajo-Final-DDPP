@@ -199,32 +199,33 @@ st.plotly_chart(fig_dht, use_container_width=True)
 # -------------------------------------------------
 st.markdown("## MPU6050 – Aceleración")
 fig_acc = go.Figure()
-colors = {"accel_x": "red", "accel_y": "green", "accel_z": "blue"}
-labels = {"accel_x": "X", "accel_y": "Y", "accel_z": "Z"}
+colors_acc = {"accel_x": "red", "accel_y": "green", "accel_z": "blue"}
+labels = {"accel_x": "X", "accel_y": "Y", "accel_z": "Z"}  # Definido aquí
 
 for col in ["accel_x", "accel_y", "accel_z"]:
     if col in df_resampled.columns:
         fig_acc.add_trace(go.Scatter(
             x=df_resampled.index, y=df_resampled[col],
             name=f"Aceleración {labels[col]}",
-            line=dict(color=colors[col])
+            line=dict(color=colors_acc[col])
         ))
 
 fig_acc.update_layout(title="Aceleración (g)", hovermode="x unified")
 st.plotly_chart(fig_acc, use_container_width=True)
 
 # -------------------------------------------------
-# GRÁFICO GIROSCOPIO
+# GRÁFICO GIROSCOPIO (CORREGIDO)
 # -------------------------------------------------
 st.markdown("## MPU6050 – Giroscopio")
 fig_gyr = go.Figure()
 colors_gyr = {"gyro_x": "purple", "gyro_y": "orange", "gyro_z": "cyan"}
+labels = {"gyro_x": "X", "gyro_y": "Y", "gyro_z": "Z"}  # Re-definido aquí
 
 for col in ["gyro_x", "gyro_y", "gyro_z"]:
     if col in df_resampled.columns:
         fig_gyr.add_trace(go.Scatter(
             x=df_resampled.index, y=df_resampled[col],
-            name=f"Giro {labels[col]}",
+            name=f"Giro {labels[col]}",  # Ahora labels existe
             line=dict(color=colors_gyr[col])
         ))
 
